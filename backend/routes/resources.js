@@ -110,36 +110,42 @@ router.get('/search', authMiddleware, async (req, res) => {
 })
 
 router.post('/crafted-from', async (req, res) => {
-  const { rawIds } = req.body;
-  const rawIdStrings = rawIds.map(id => id.toString());
+  const { rawIds } = req.body
 
   if (!rawIds || !Array.isArray(rawIds)) {
     return res.status(400).json({ message: 'Missing or invalid rawIds' })
   }
 
+  const initialIds = rawIds.map(id => id.toString())
+
   try {
-    const craftedResources = await ResourceType.find({ isCrafted: true })
+    const craftedResources = await ResourceType.find({ isCrafted: true }).lean()
 
-    const matched = craftedResources.filter(resource => {
-      if (!resource.inputs?.length) return false;
+    const found = []
+    const queue = [...initialIds]
+    const seen = new Set(initialIds)
 
-      const found = resource.inputs.some(inputGroup => {
-        if (!inputGroup.resources?.length) return false;
+    while (queue.length) {
+      const currentId = queue.shift()
 
-        return inputGroup.resources.some(r => {
-          const id = r.resource?.toString?.()
-          const match = rawIdStrings.includes(id.toString());
-          return match;
-        });
-      });
+      for (const resource of craftedResources) {
+        const resourceId = resource._id.toString()
+        if (seen.has(resourceId)) continue
+        if (!resource.inputs?.length) continue
 
-      /*if (found) {
-        console.log('Matched:', resource.name);
-      }*/
+        const usesCurrent = resource.inputs.some(group =>
+          group.resources?.some(r => r.resource?.toString() === currentId)
+        )
 
-      return found;
-    });
-    res.json(matched)
+        if (usesCurrent) {
+          found.push(resource)
+          queue.push(resourceId)
+          seen.add(resourceId)
+        }
+      }
+    }
+
+    res.json(found)
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: 'Server error' })
