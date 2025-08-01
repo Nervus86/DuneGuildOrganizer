@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import FormField from '@/components/FormField.vue'
 import FormControl from '@/components/FormControl.vue'
 import FormCheckRadioGroup from '@/components/FormCheckRadioGroup.vue'
+import TreeNode from '@/components/TreeNode.vue'
 import PillTag from '@/components/PillTag.vue'
 import LayoutAuthenticated from '@/layouts/LayoutAuthenticated.vue'
 import SectionMain from '@/components/SectionMain.vue'
@@ -66,19 +67,26 @@ const selectMember = (member) => {
 const possibleCrafted = ref([])
 
 const fetchPossibleCrafted = async () => {
+  console.log('Fetching possible crafted resources...')
   const rawIds = newEvent.value.resources.map((r) => r._id || r)
 
   try {
-    const craftedList = await resourceStore.fetchCraftedFromRaw(rawIds)
+    const payload = {
+      rawIds,
+      type: RefineType.value,
+    }
+    console.log('payload:', payload)
+    const craftedList = await resourceStore.fetchCraftedFromRaw(payload)
     if (!craftedList?.length) return
     possibleCrafted.value = craftedList
-    await resourceStore.fetchExchangeRates(craftedList.map((cl=>cl._id)), RefineType.value)
-    console.log('Exchange rates:', resourceStore.exchangeRates)
+    //await resourceStore.fetchExchangeRates(craftedList.map((cl=>cl._id)), RefineType.value)
+    //console.log('Exchange rates:', resourceStore.exchangeRates)
   } catch (err) {
     console.error('Error fetching crafted resources:', err)
   }
 }
 watch(guildRefined, async (newVal) => {
+  console.log('Guild refined changed:', newVal)
   if (!newVal || newVal.length === 0) return
   if (!newEvent.value.resources) return
   fetchPossibleCrafted()
@@ -195,15 +203,13 @@ watch(guildRefined, async (newVal) => {
           />
         </div>
         <ul class="bg-white dark:bg-gray-800 shadow rounded mt-4 ml-4">
-          <li
-            v-for="m in possibleCrafted"
-            :key="m._id"
-            color="success"
-            :label="m.name"
-            class="px-4 py-2 flex justify-between items-center cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
-            {{ m.name }}
-          </li>
+          <TreeNode
+            v-for="node in possibleCrafted"
+            :key="node._id"
+            :node="node"
+            :resource-qta="resourceQta"
+            :members-count="newEvent.members.length"
+          />
         </ul>
       </div>
     </SectionMain>

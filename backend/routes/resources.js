@@ -109,48 +109,122 @@ router.get('/search', authMiddleware, async (req, res) => {
   }
 })
 
-router.post('/crafted-from', async (req, res) => {
-  const { rawIds } = req.body
+router.post('/crafted-tree', async (req, res) => {
+  const { rawIds, type } = req.body;
 
   if (!rawIds || !Array.isArray(rawIds)) {
-    return res.status(400).json({ message: 'Missing or invalid rawIds' })
+    return res.status(400).json({ message: 'Missing or invalid rawIds' });
   }
 
-  const initialIds = rawIds.map(id => id.toString())
+  if (!type || typeof type !== 'string') {
+    return res.status(400).json({ message: 'Missing or invalid type' });
+  }
 
   try {
-    const craftedResources = await ResourceType.find({ isCrafted: true }).lean()
+    const allResources = await ResourceType.find({}).lean();
+    const craftedResources = allResources.filter(r => r.isCrafted);
+    const resourceMap = new Map(allResources.map(r => [r._id.toString(), r]));
 
-    const found = []
-    const queue = [...initialIds]
-    const seen = new Set(initialIds)
-
-    while (queue.length) {
-      const currentId = queue.shift()
-
-      for (const resource of craftedResources) {
-        const resourceId = resource._id.toString()
-        if (seen.has(resourceId)) continue
-        if (!resource.inputs?.length) continue
-
-        const usesCurrent = resource.inputs.some(group =>
-          group.resources?.some(r => r.resource?.toString() === currentId)
-        )
-
-        if (usesCurrent) {
-          found.push(resource)
-          queue.push(resourceId)
-          seen.add(resourceId)
-        }
+    // Build Exchange Rates Map (craftedId|inputId -> ratio)
+    const exchangeRates = await ExchangeRate.find({ 'resources.type': type }).lean();
+    const exchangeRateMap = new Map();
+    for (const ex of exchangeRates) {
+      const craftedId = ex.resource.toString();
+      const typeGroup = ex.resources.find(g => g.type === type);
+      if (!typeGroup) continue;
+      for (const res of typeGroup.resources) {
+        const inputId = res.resource.toString();
+        const key = `${craftedId}|${inputId}`;
+        exchangeRateMap.set(key, res.ratio);
       }
     }
 
-    res.json(found)
+    // Build Inputs array for a resource
+    const buildInputs = (resource) => {
+      const typeInputGroups = resource.inputs.filter(group => group.type === type);
+      const inputs = [];
+      for (const group of typeInputGroups) {
+        for (const r of group.resources) {
+          const inputResource = resourceMap.get(r.resource.toString());
+          if (inputResource) {
+            const rateKey = `${resource._id.toString()}|${inputResource._id.toString()}`;
+            inputs.push({
+              resourceId: inputResource._id.toString(),
+              resource: inputResource.name,
+              amountPerUnit: r.amountPerUnit,
+              exchangeRate: exchangeRateMap.get(rateKey) ?? null,
+              amountFinal: r.amountPerUnit * (exchangeRateMap.get(rateKey) ?? 1)
+            });
+          }
+        }
+      }
+      return inputs;
+    };
+
+    // Recursive Tree Builder
+    const buildTree = async (currentId, seen) => {
+      const children = [];
+
+      for (const resource of craftedResources) {
+        const resourceId = resource._id.toString();
+        if (seen.has(resourceId)) continue;
+        const typeInputGroups = resource.inputs.filter(group => group.type === type);
+        if (!typeInputGroups.length) continue;
+
+        const usesCurrent = typeInputGroups.some(group =>
+          group.resources.some(r => r.resource.toString() === currentId)
+        );
+
+        if (usesCurrent) {
+          seen.add(resourceId);
+          const childNode = {
+            _id: resource._id,
+            name: resource.name,
+            inputs: buildInputs(resource),
+            children: await buildTree(resourceId, seen)
+          };
+          children.push(childNode);
+        }
+      }
+
+      return children;
+    };
+
+    const initialRawIds = rawIds.map(id => id.toString());
+
+    // Find crafted roots that use these rawIds
+    const craftedRoots = craftedResources.filter(resource =>
+      resource.inputs.some(group =>
+        group.type === type &&
+        group.resources.some(input => initialRawIds.includes(input.resource.toString()))
+      )
+    );
+
+    const result = [];
+    const seen = new Set();
+
+    for (const crafted of craftedRoots) {
+      seen.add(crafted._id.toString());
+      const node = {
+        _id: crafted._id,
+        name: crafted.name,
+        inputs: buildInputs(crafted),
+        children: await buildTree(crafted._id.toString(), seen)
+      };
+      result.push(node);
+    }
+
+    res.json(result);
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ message: 'Server error' })
+    console.error('Error during crafted-tree build:', err);
+    res.status(500).json({ message: 'Server error' });
   }
-})
+});
+
+
+
+
+
 
 router.post('/exchange-rates', authMiddleware, async (req, res) => {
   const { craftedIds, type } = req.body
