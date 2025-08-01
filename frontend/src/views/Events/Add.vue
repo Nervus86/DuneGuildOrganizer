@@ -1,3 +1,4 @@
+<!-- eslint-disable vue/multi-word-component-names -->
 <script setup>
 import { ref, watch } from 'vue'
 import FormField from '@/components/FormField.vue'
@@ -65,6 +66,16 @@ const selectMember = (member) => {
 }
 
 const possibleCrafted = ref([])
+const nodesMap = ref({})
+
+const buildNodesMap = (nodes) => {
+  for (const n of nodes) {
+    nodesMap.value[n._id] = n
+    if (n.children && n.children.length) {
+      buildNodesMap(n.children)
+    }
+  }
+}
 
 const fetchPossibleCrafted = async () => {
   console.log('Fetching possible crafted resources...')
@@ -79,6 +90,8 @@ const fetchPossibleCrafted = async () => {
     const craftedList = await resourceStore.fetchCraftedFromRaw(payload)
     if (!craftedList?.length) return
     possibleCrafted.value = craftedList
+    nodesMap.value = {}
+    buildNodesMap(craftedList)
     //await resourceStore.fetchExchangeRates(craftedList.map((cl=>cl._id)), RefineType.value)
     //console.log('Exchange rates:', resourceStore.exchangeRates)
   } catch (err) {
@@ -209,6 +222,7 @@ watch(guildRefined, async (newVal) => {
             :node="node"
             :resource-qta="resourceQta"
             :members-count="newEvent.members.length"
+            :nodes-map="nodesMap"
           />
         </ul>
       </div>
