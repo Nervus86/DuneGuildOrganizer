@@ -25,6 +25,7 @@
         :node="child"
         :resource-qta="resourceQta"
         :members-count="membersCount"
+        :nodes-map="nodesMap"
       />
     </ul>
   </li>
@@ -36,9 +37,11 @@ import { computed } from 'vue'
 const props = defineProps({
   node: Object,
   resourceQta: Object, // { resourceId: qta }
-  membersCount: Number
+  membersCount: Number,
+  nodesMap: Object
 })
-const calculateCraftableAmount = (node, resourceQta) => {
+
+const calculateCraftableAmount = (node, resourceQta, nodesMap) => {
   if (!node.inputs || node.inputs.length === 0) {
     // Se è raw resource, ritorna la quantità disponibile
     return resourceQta[node._id] || 0
@@ -47,12 +50,10 @@ const calculateCraftableAmount = (node, resourceQta) => {
   let craftableUnits = Infinity
 
   for (const input of node.inputs) {
-    // Se è una raw resource (non ha children), usa resourceQta
-    const isRaw = !node.children.find(child => child._id === input.resourceId)
-
-    const availableAmount = isRaw
-      ? (resourceQta[input.resourceId] || 0)
-      : calculateCraftableAmount(node.children.find(child => child._id === input.resourceId), resourceQta)
+    const mappedNode = nodesMap?.[input.resourceId]
+    const availableAmount = mappedNode
+      ? calculateCraftableAmount(mappedNode, resourceQta, nodesMap)
+      : (resourceQta[input.resourceId] || 0)
 
     const possibleUnits = Math.floor(availableAmount / input.amountFinal)
 
@@ -62,11 +63,8 @@ const calculateCraftableAmount = (node, resourceQta) => {
   return craftableUnits
 }
 
-
-
-
 const craftableAmount = computed(() => {
-  return calculateCraftableAmount(props.node, props.resourceQta)
+  return calculateCraftableAmount(props.node, props.resourceQta, props.nodesMap)
 })
 
 const perPlayerAmount = computed(() => {
